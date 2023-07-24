@@ -34,10 +34,19 @@ async function run() {
       res.send('Ovigo is running!')
     })
 
-    // users
+    // users related API
+
+    //get user id
+    app.get('/getuserId/:email', async (req, res) => {
+      const email = req.params.email;
+      const user = await usersCollection.findOne({ email: email });
+      res.send({ userId: user?._id });
+    })
+
+    // store user information
     app.post('/users', async (req, res) => {
       const users = req.body;
-
+      users.joinedCommunities = [];
       // check if the user is existing
       const user = await usersCollection.findOne({ email: users.email });
       if (user) {
@@ -47,8 +56,52 @@ async function run() {
       res.send(result);
     })
 
-    // community
-    // get creators all community
+    // community related API
+
+    // get all members info of a community
+    app.get('/community/users/:id', async (req, res) => {
+      const id = req.params.id;
+
+      const community = await communitiesCollection.findOne({ '_id': new ObjectId(id) });
+      // get members email
+      const membersEmail = community?.members;
+      // find members informaiton
+      const usersInCommunity = await usersCollection.find({ 'email': { $in: membersEmail } }).toArray();
+      res.send(usersInCommunity);
+    })
+
+    // get communities post that user are already joined
+    app.get('/community/joined/:email', async (req, res) => {
+      const email = req.params.email;
+      const user = await usersCollection.findOne({ "email": email });
+      // Extract the community IDs from the user document's 'joinedCommunities' field.
+      const joinedCommunityIds = user?.joinedCommunities;
+      console.log(joinedCommunityIds);
+      if (!joinedCommunityIds) {
+        return res.send([]);
+      }
+      const postsInCommunities = await postsCollection.find({ "community_id": { $in: joinedCommunityIds } }).toArray();
+      // const result = await communitiesCollection.find({ "_id": { $in: joinedCommunityIds } }).toArray();
+      res.send(postsInCommunities);
+    })
+
+    // get communities that user can join
+    app.get('/community/canJoin/:email', async (req, res) => {
+      const email = req.params.email;
+      const user = await usersCollection.findOne({ "email": email });
+      // Extract the community IDs from the user document's 'joinedCommunities' field.
+      const joinedCommunityIds = user?.joinedCommunities;
+      console.log(joinedCommunityIds);
+      if (!joinedCommunityIds) {
+        return res.send([]);
+      }
+
+      const result = await communitiesCollection.find({ "_id": { $nin: joinedCommunityIds } }).toArray();
+      res.send(result);
+    })
+
+
+    // get all community created by a specific user
     app.get('/community/:email', async (req, res) => {
       const email = req.params.email;
       const result = await communitiesCollection.find({ creator_email: email }).toArray();
@@ -66,9 +119,51 @@ async function run() {
     // create a community
     app.post('/community', async (req, res) => {
       const community = req.body;
+      community.members = [];
       const result = await communitiesCollection.insertOne(community);
+
+      // add the user to the community
+      const updateCommunity = await communitiesCollection.updateOne(
+        { "_id": result.insertedId },
+        { $push: { members: community.creator_email } }
+      );
+      const updateUser = await usersCollection.updateOne(
+        { "email": community.creator_email },
+        { $push: { joinedCommunities: result.insertedId } }
+      );
+
       res.send(result);
     })
+
+    // add user to a community
+    app.patch('/community/addjoined', async (req, res) => {
+      const info = req.body;
+      const result = await communitiesCollection.updateOne(
+        { "_id": new ObjectId(info.communityId) },
+        { $push: { members: info.userEmail } }
+      );
+      const result1 = await usersCollection.updateOne(
+        { "email": info.userEmail },
+        { $push: { joinedCommunities: new ObjectId(info.communityId) } }
+      );
+      res.send(result1);
+    })
+
+    // remove user from a community
+    app.patch('/community/removeJoined', async (req, res) => {
+      const deleteInfo = req.body;
+      console.log(deleteInfo);
+      const result = await communitiesCollection.updateOne(
+        { "_id": new ObjectId(deleteInfo.communityId) },
+        { $pull: { members: deleteInfo.userEmail } }
+      );
+      const result1 = await usersCollection.updateOne(
+        { "email": deleteInfo.userEmail },
+        { $pull: { joinedCommunities: new ObjectId(deleteInfo.communityId) } }
+      );
+      res.send(result1);
+    })
+
 
     // posts related API
 
